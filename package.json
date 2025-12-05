@@ -1,0 +1,24 @@
+{
+  "name": "unichain",
+  "version": "1.0.0",
+  "description": "UNI-CHAIN - Blockchain-based Supply Transparency for Agricultural Produce",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+  },
+  "keywords": [
+    "blockchain",
+    "supply-chain",
+    "traceability",
+    "agriculture"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
