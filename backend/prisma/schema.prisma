@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  role         String   // "FARMER" | "TRANSPORTER" | "RETAILER" | "CONSUMER" | "ADMIN"
+  did          String   @unique
+  publicKey    String
+  encMobile    String
+  mobileHash   String?
+  name         String?
+  status       String   @default("ACTIVE") // "ACTIVE" | "SUSPENDED"
+  trustScore   Float    @default(0.5)
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  farmerIdentity     FarmerIdentity?
+  transporterIdentity TransporterIdentity?
+  retailerIdentity   RetailerIdentity?
+
+  economicLedgerTxs  EconomicLedgerTx[]
+  qualityLedgerTxs   QualityLedgerTx[]
+  zkpLogs            ZkpLog[]
+  produceLogs        ProduceLog[]
+
+  @@index([did])
+  @@index([role])
+  @@index([mobileHash])
+}
+
+model FarmerIdentity {
+  id          String @id @default(cuid())
+  userId      String @unique
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encPan      String?
+  encGstin    String?
+  encPmKisan  String?
+  encAadhaar  String?
+  name        String
+  businessName String
+  address     String
+  createdAt   DateTime @default(now())
+}
+
+model TransporterIdentity {
+  id            String @id @default(cuid())
+  userId        String @unique
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encVehicleRC  String
+  encDriverLicense String
+  encGstin      String
+  name          String
+  companyName   String
+  address       String
+  createdAt     DateTime @default(now())
+}
+
+model RetailerIdentity {
+  id          String @id @default(cuid())
+  userId      String @unique
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encGstin    String
+  encPan      String
+  name        String
+  shopName    String
+  address     String
+  createdAt   DateTime @default(now())
+}
+
+model TransportVehicle {
+  id              String @id @default(cuid())
+  vehicleNo       String @unique
+  deviceId        String @unique
+  transporterUserId String
+  createdAt       DateTime @default(now())
+}
+
+model EconomicLedgerTx {
+  id            String   @id @default(cuid())
+  txId          String?  @unique // Unique transaction ID (optional for backward compatibility)
+  txHash        String   @unique
+  prevTxHash    String?
+  ledgerType    String   @default("ECONOMIC")
+  batchId       String?  // Product batch being traded
+  shipmentId    String?
+  fromParty     String?  // farmer, transporter, retailer (role)
+  toParty       String?  // farmer, transporter, retailer (role)
+  payerDid      String?  // DID of payer
+  payeeDid      String?  // DID of payee
+  product       String?  // Product name
+  quantity      Float?   // Quantity sold/received (kg / boxes)
+  amount        Float?   // Money involved (INR)
+  paymentMethod String?  // UPI / Cash / Settlement
+  margin        Float?
+  meta          Json?
+  createdAt     DateTime @default(now())
+
+  user          User?    @relation(fields: [payerDid], references: [did])
+
+  @@index([batchId])
+  @@index([txId])
+  @@index([payerDid])
+  @@index([payeeDid])
+  @@index([fromParty])
+  @@index([toParty])
+  @@index([txHash])
+}
+
+model QualityLedgerTx {
+  id                String   @id @default(cuid())
+  txId              String?  @unique // Unique transaction ID (optional for backward compatibility)
+  txHash            String   @unique
+  prevTxHash        String?
+  ledgerType        String   @default("QUALITY")
+  batchId           String?  // Product batch being tracked
+  shipmentId        String?
+  actorDid          String?  // DID of the actor (farmer, transporter, retailer)
+  stage             String?  // harvest, sorting, transport, retail
+  qualityScore      Float?  // 0-100
+  moistureLevel     Float?  // IoT moisture reading
+  temperature       Float?  // Cold chain temperature
+  spoilageDetected  Boolean? // TRUE/FALSE
+  aiVerificationHash String? // AI-generated visual fingerprint
+  iotMerkleRoot     String?  // Hash of all IoT readings
+  qualityData       Json?    // Additional quality data (backward compatibility)
+  createdAt         DateTime @default(now())
+
+  user              User?    @relation(fields: [actorDid], references: [did])
+
+  @@index([batchId])
+  @@index([txId])
+  @@index([actorDid])
+  @@index([stage])
+  @@index([txHash])
+}
+
+model ZkpLog {
+  id          String   @id @default(cuid())
+  did         String
+  batchId     String?
+  proofType   String   // "MARGIN" | "PAYMENT" | "ROUTE" | "EXPIRY"
+  proofPayload String
+  verified    Boolean
+  message     String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [did], references: [did])
+
+  @@index([did])
+  @@index([batchId])
+  @@index([proofType])
+}
+
+model Anomaly {
+  id          String   @id @default(cuid())
+  batchId     String?
+  did         String?
+  anomalyType String   // "PRICE_CAP_VIOLATION" | "ZKP_FAILURE" | "TRUST_SCORE_DROP"
+  details     Json?
+  status      String   @default("PENDING") // "PENDING" | "RESOLVED" | "FAILED"
+  createdAt   DateTime @default(now())
+
+  @@index([batchId])
+  @@index([did])
+  @@index([anomalyType])
+}
+
+model ProduceLog {
+  id            String   @id @default(cuid())
+  batchId       String   @unique
+  farmerDid     String
+  productName   String
+  variety       String?
+  quantity      Float
+  unit          String   // "kg" | "quintal" | "tonne" | "crate" | "bag"
+  harvestDate   DateTime
+  farmingMethod String   // "organic" | "natural" | "conventional" | "integrated"
+  sellingPrice  Float
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [farmerDid], references: [did], onDelete: Cascade)
+
+  @@index([farmerDid])
+  @@index([batchId])
+  @@index([createdAt])
+}
+
+model SupplyQuantity {
+  id            String   @id @default(cuid())
+  productId     String   @unique // e.g., "APPLE", "POTATO", etc.
+  quantity      Float    @default(0)
+  unit          String   @default("kg")
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@index([productId])
+}
+
