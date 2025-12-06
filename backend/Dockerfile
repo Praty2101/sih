@@ -6,8 +6,8 @@ FROM base AS deps
 WORKDIR /app
 
 # Copy package files
-COPY backend/package*.json ./
-COPY backend/prisma ./prisma/
+COPY package*.json ./
+COPY prisma ./prisma/
 
 # Install dependencies
 RUN npm ci --only=production && \
@@ -21,15 +21,15 @@ FROM base AS builder
 WORKDIR /app
 
 # Copy package files
-COPY backend/package*.json ./
-COPY backend/tsconfig.json ./
+COPY package*.json ./
+COPY tsconfig.json ./
 
 # Install all dependencies (including devDependencies)
 RUN npm ci
 
 # Copy source code
-COPY backend/src ./src
-COPY backend/prisma ./prisma
+COPY src ./src
+COPY prisma ./prisma
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -51,7 +51,7 @@ COPY --from=deps --chown=nodejs:nodejs /usr/local/bin/prisma /usr/local/bin/pris
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
-COPY --chown=nodejs:nodejs backend/package*.json ./
+COPY --chown=nodejs:nodejs package*.json ./
 
 # Switch to non-root user
 USER nodejs
@@ -65,4 +65,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Start the application
 CMD ["node", "dist/server.js"]
-
