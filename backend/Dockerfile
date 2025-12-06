@@ -6,11 +6,11 @@ FROM base AS deps
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 COPY prisma ./prisma/
 
-# Install dependencies
-RUN npm ci --only=production && \
+# Install production dependencies
+RUN npm install --omit=dev && \
     npm cache clean --force
 
 # Install Prisma CLI for migrations
@@ -21,11 +21,11 @@ FROM base AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 COPY tsconfig.json ./
 
 # Install all dependencies (including devDependencies)
-RUN npm ci
+RUN npm install
 
 # Copy source code
 COPY src ./src
@@ -51,7 +51,7 @@ COPY --from=deps --chown=nodejs:nodejs /usr/local/bin/prisma /usr/local/bin/pris
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
-COPY --chown=nodejs:nodejs package*.json ./
+COPY --chown=nodejs:nodejs package.json ./
 
 # Switch to non-root user
 USER nodejs
