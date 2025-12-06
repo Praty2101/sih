@@ -12,6 +12,32 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Root endpoint - API info
+app.get('/', (req, res) => {
+  res.json({
+    name: 'UNI-CHAIN API',
+    version: '1.0.0',
+    status: 'running',
+    documentation: {
+      health: '/health',
+      api: '/api',
+      login: 'POST /api/login',
+      register: {
+        farmer: 'POST /api/register/farmer',
+        transporter: 'POST /api/register/transporter',
+        retailer: 'POST /api/register/retailer',
+        consumer: 'POST /api/register/consumer'
+      },
+      supplies: 'GET /api/supplies',
+      ledger: {
+        economic: 'GET /api/ledger/economic',
+        quality: 'GET /api/ledger/quality',
+        zkp: 'GET /api/ledger/zkp'
+      }
+    }
+  });
+});
+
 app.use('/api', routes);
 
 // Error handling middleware (must be after routes)
