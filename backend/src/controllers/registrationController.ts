@@ -169,7 +169,7 @@ export async function registerTransporter(req: Request, res: Response) {
     });
 
     // Generate a unique deviceId
-    let deviceId: string;
+    let deviceId: string = '';
     let deviceExists = true;
     while (deviceExists) {
       deviceId = `device-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;

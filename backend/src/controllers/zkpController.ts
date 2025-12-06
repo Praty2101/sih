@@ -145,7 +145,11 @@ export async function verifyZKP(req: Request, res: Response) {
           anomalyType: 'ZKP_FAILURE',
           details: {
             proofType: zkpLog.proofType,
-            verificationResult,
+            verificationResult: {
+              verified: verificationResult.verified,
+              message: verificationResult.message,
+              details: verificationResult.details,
+            },
             proofHash: proof.proofHash,
           },
           status: 'FAILED',
