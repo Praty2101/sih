@@ -8,6 +8,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );
-
-
-// Force rebuild Sat Dec  6 22:36:47 IST 2025
