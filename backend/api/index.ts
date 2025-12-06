@@ -11,7 +11,7 @@ async function getApp() {
     import('express'),
     import('cors'),
     import('dotenv'),
-    import('../src/routes')
+    import('../src/routes/index.js') // explicit .js for Vercel ESM resolution
   ]);
 
   // Load env vars (Vercel provides them via process.env)
