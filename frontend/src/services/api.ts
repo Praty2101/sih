@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-// Use relative URL in production (Vercel), absolute URL in development
+// Use Render backend in production, localhost in development
 const API_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
+  (import.meta.env.PROD ? 'https://sih-5-nt3w.onrender.com/api' : 'http://localhost:3001/api');
 
 const api = axios.create({
   baseURL: API_URL,
