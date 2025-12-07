@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { authService } from '../../services/auth';
 import { suppliesService, Supply } from '../../services/supplies';
+import { ordersService } from '../../services/orders';
 import { useNotifications } from '../../context/NotificationContext';
 
 interface Order {
@@ -61,30 +62,31 @@ export default function OrderSupplies() {
       }
       
       if (user.role === 'CONSUMER') {
-        // Load consumer orders from localStorage and merge with ledger data
+        // Load consumer orders from API (database ledger)
         try {
-          const saved = localStorage.getItem('unichain_consumer_orders');
-          const consumerOrders = saved ? JSON.parse(saved) : [];
+          const response = await ordersService.getMyOrders('placed');
+          const myOrders = response.orders || [];
           
-          // Also check ledger for accepted orders to update status
-          const ledgerSaved = localStorage.getItem('unichain_economic_ledger_orders');
-          const ledgerEntries = ledgerSaved ? JSON.parse(ledgerSaved) : [];
+          // Convert API response to Order format
+          const consumerOrders: Order[] = myOrders.map((entry: any) => ({
+            orderId: entry.orderId,
+            supplyItem: entry.product,
+            quantity: entry.quantity,
+            unit: entry.meta?.unit || 'kg',
+            price: entry.meta?.price || (entry.quantity > 0 ? entry.amount / entry.quantity : 0),
+            totalAmount: entry.amount,
+            from: entry.meta?.fromName || 'Me',
+            fromDid: entry.payerDid,
+            fromRole: entry.fromParty,
+            toRole: entry.toParty,
+            status: entry.status === 'ACCEPTED' ? 'Accepted' : 'Pending',
+            deliveryPreference: entry.meta?.deliveryPreference || 'Standard',
+            destination: entry.meta?.destination || '',
+            notes: entry.meta?.notes || undefined,
+            createdAt: entry.createdAt,
+          }));
           
-          // Update order statuses based on ledger
-          const updatedOrders = consumerOrders.map((order: Order) => {
-            // Check if there's an accepted entry for this order
-            const hasAcceptedEntry = ledgerEntries.some((e: any) => 
-              e.orderId === order.orderId && 
-              e.entryType === 'ORDER_ACCEPTED'
-            );
-            
-            if (hasAcceptedEntry && order.status === 'Pending') {
-              return { ...order, status: 'Accepted' as const };
-            }
-            return order;
-          });
-          
-          setOrders(updatedOrders);
+          setOrders(consumerOrders);
           setLoadingOrders(false);
         } catch (error) {
           console.error('Failed to load consumer orders', error);
@@ -125,7 +127,7 @@ export default function OrderSupplies() {
     }
   }, [activeTab, user]);
 
-  const loadReceivedOrders = () => {
+  const loadReceivedOrders = async () => {
     if (!user?.role) {
       setLoadingOrders(false);
       return;
@@ -133,94 +135,39 @@ export default function OrderSupplies() {
     
     try {
       setLoadingOrders(true);
-      // Load all orders from ledger where this user's role is the receiver
-      const saved = localStorage.getItem('unichain_economic_ledger_orders');
-      const allLedgerEntries = saved ? JSON.parse(saved) : [];
       
-      console.log(`[loadReceivedOrders] User role: ${user.role}, Total ledger entries: ${allLedgerEntries.length}`);
-      console.log(`[loadReceivedOrders] All ORDER_PLACED entries:`, allLedgerEntries.filter((e: any) => e.entryType === 'ORDER_PLACED'));
+      // Load pending orders from API (database ledger)
+      const response = await ordersService.getPendingOrders();
+      const pendingOrders = response.orders || [];
       
-      // Filter orders that are for this user's role and still pending (not accepted)
-      const receivedOrders = allLedgerEntries
-        .filter((entry: any) => {
-          // Check if this is an order entry
-          if (!entry.orderId || !entry.entryType) {
-            return false;
-          }
-          
-          // Must be an ORDER_PLACED entry
-          if (entry.entryType !== 'ORDER_PLACED') {
-            return false;
-          }
-          
-          // Check if order is for this role - entry must have fromRole
-          if (!entry.fromRole) {
-            console.warn('[loadReceivedOrders] Order entry missing fromRole:', entry.orderId, entry);
-            return false;
-          }
-          
-          const receiverRole = getReceiverRoleForOrder(entry.fromRole);
-          console.log(`[loadReceivedOrders] Order ${entry.orderId}: fromRole=${entry.fromRole}, receiverRole=${receiverRole}, user.role=${user.role}`);
-          
-          if (receiverRole !== user.role) {
-            return false;
-          }
-          
-          // Only show pending orders (not yet accepted)
-          // Check if there's no accepted entry for this order
-          const hasAcceptedEntry = allLedgerEntries.some((e: any) => 
-            e.orderId === entry.orderId && 
-            e.entryType === 'ORDER_ACCEPTED'
-          );
-          
-          if (hasAcceptedEntry) {
-            console.log(`[loadReceivedOrders] Order ${entry.orderId} has been accepted, skipping`);
-            return false;
-          }
-          
-          // Must be pending status (accept 'Pending', undefined, null, or empty string)
-          const isPending = entry.status === 'Pending' || entry.status === undefined || entry.status === null || entry.status === '';
-          console.log(`[loadReceivedOrders] Order ${entry.orderId} isPending=${isPending}, status="${entry.status}"`);
-          return isPending;
-        })
-        .map((entry: any) => {
-          // Convert ledger entry to Order format
-          return {
-            orderId: entry.orderId,
-            supplyItem: entry.product,
-            quantity: entry.quantity,
-            unit: entry.unit || 'kg',
-            price: entry.quantity > 0 ? entry.amount / entry.quantity : 0,
-            totalAmount: entry.amount,
-            from: entry.fromParty,
-            fromDid: entry.fromDid,
-            fromRole: entry.fromRole,
-            toRole: user.role,
-            status: 'Pending',
-            deliveryPreference: entry.deliveryPreference || 'Standard',
-            destination: entry.destination || 'To be determined',
-            notes: entry.notes || undefined,
-            createdAt: entry.timestamp,
-          };
-        });
+      console.log(`[loadReceivedOrders] Loaded ${pendingOrders.length} pending orders from database`);
       
-      // Remove duplicates based on orderId (keep the most recent)
-      const uniqueOrdersMap = new Map();
-      receivedOrders.forEach((order: Order) => {
-        if (!uniqueOrdersMap.has(order.orderId)) {
-          uniqueOrdersMap.set(order.orderId, order);
-        }
-      });
-      
-      const uniqueOrders = Array.from(uniqueOrdersMap.values());
+      // Convert API response to Order format
+      const receivedOrders: Order[] = pendingOrders.map((entry: any) => ({
+        orderId: entry.orderId,
+        supplyItem: entry.product,
+        quantity: entry.quantity,
+        unit: entry.unit || 'kg',
+        price: entry.price || (entry.quantity > 0 ? entry.amount / entry.quantity : 0),
+        totalAmount: entry.amount,
+        from: entry.fromName || entry.fromParty,
+        fromDid: entry.fromDid || entry.payerDid,
+        fromRole: entry.fromParty,
+        toRole: user.role,
+        status: 'Pending',
+        deliveryPreference: entry.deliveryPreference || 'Standard',
+        destination: entry.destination || 'To be determined',
+        notes: entry.notes || undefined,
+        createdAt: entry.createdAt,
+      }));
       
       // Sort by creation date (newest first)
-      uniqueOrders.sort((a, b) => 
+      receivedOrders.sort((a, b) => 
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
       
-      console.log(`[OrderSupplies] Loaded ${uniqueOrders.length} received orders for ${user.role}:`, uniqueOrders);
-      setOrders(uniqueOrders);
+      console.log(`[OrderSupplies] Loaded ${receivedOrders.length} received orders for ${user.role}`);
+      setOrders(receivedOrders);
     } catch (error) {
       console.error('Failed to load received orders', error);
       setOrders([]);
@@ -339,139 +286,106 @@ export default function OrderSupplies() {
     return '/dashboard/order-supplies';
   };
 
-  const confirmOrder = () => {
+  const confirmOrder = async () => {
     if (!selectedItem || !user) return;
 
-    const orderId = `ORD-${Date.now().toString().slice(-6)}`;
     const receiverRole = getReceiverRole();
 
-    // Create new order
-    const newOrder: Order = {
-      orderId,
-      supplyItem: selectedItem.name,
-      quantity: parseInt(formData.quantity),
-      unit: selectedItem.unit,
-      price: selectedItem.currentPrice,
-      totalAmount: orderPrice,
-      from: user.name || 'User',
-      fromDid: user.did || '',
-      fromRole: user.role,
-      toRole: receiverRole || '',
-      status: 'Pending',
-      deliveryPreference: formData.deliveryPreference,
-      destination: formData.destination,
-      notes: formData.notes || undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Note: Do NOT decrease quantity when order is placed
-    // Quantity will only decrease when retailer accepts the order
-    // This ensures accurate inventory tracking
-
-    // Register order in Economic Ledger (Order Placed)
-    const orderPlacedEntry = {
-      txId: `TX-${orderId}-PLACED`,
-      txHash: `HASH-${orderId}-PLACED-${Date.now()}`,
-      prevTxHash: null,
-      batchId: null,
-      fromParty: user.name || 'User',
-      toParty: receiverRole || 'Pending',
-      fromDid: user.did || null,
-      toDid: null,
-      fromRole: user.role, // CRITICAL: Store the role of who placed the order
-      product: selectedItem.name,
-      quantity: parseInt(formData.quantity),
-      unit: selectedItem.unit, // Store unit for display
-      amount: orderPrice,
-      paymentMethod: 'Order Placed',
-      timestamp: new Date().toISOString(),
-      currency: 'INR',
-      entryType: 'ORDER_PLACED',
-      orderId: orderId,
-      status: 'Pending',
-      deliveryPreference: formData.deliveryPreference, // Store delivery preference
-      destination: formData.destination, // Store destination
-      notes: formData.notes || null, // Store notes if any
-    };
-    
-    // Save to localStorage for Economic Ledger display
-    const existingLedger = JSON.parse(localStorage.getItem('unichain_economic_ledger_orders') || '[]');
-    existingLedger.push(orderPlacedEntry);
-    localStorage.setItem('unichain_economic_ledger_orders', JSON.stringify(existingLedger));
-    
-    console.log('[confirmOrder] Order placed and saved to ledger:', {
-      orderId,
-      fromRole: user.role,
-      receiverRole,
-      entry: orderPlacedEntry,
-      totalEntries: existingLedger.length
-    });
-    
-    console.log('[confirmOrder] Order placed and saved to ledger:', {
-      orderId,
-      fromRole: user.role,
-      receiverRole,
-      entry: orderPlacedEntry,
-      totalEntries: existingLedger.length
-    });
-
-    // Add notification for order placed (to the person who placed it)
-    addNotification({
-      type: 'order_placed',
-      orderId,
-      message: `Your order ${orderId} has been placed successfully`,
-      fromUser: user.name || 'User',
-      fromRole: user.role,
-      toRole: receiverRole || '',
-      supplyItem: selectedItem.name,
-      quantity: parseInt(formData.quantity),
-      unit: selectedItem.unit,
-      totalAmount: orderPrice,
-    });
-
-    // Add notification for order received (to all users of the receiver role)
-    // This will be shown to all retailers/transporters/farmers based on the flow
-    addNotification({
-      type: 'order_received',
-      orderId,
-      message: `New order received: ${selectedItem.name} (${formData.quantity} ${selectedItem.unit}) from ${user.name || 'User'}`,
-      fromUser: user.name || 'User',
-      fromRole: user.role,
-      toRole: receiverRole || '',
-      supplyItem: selectedItem.name,
-      quantity: parseInt(formData.quantity),
-      unit: selectedItem.unit,
-      totalAmount: orderPrice,
-      actionUrl: `${getOrderSuppliesPath()}?tab=receive`,
-    });
-
-    // Store order for all roles to track their placed orders
-    const orderStorageKey = `unichain_${user.role.toLowerCase()}_orders`;
     try {
-      const existingOrders = JSON.parse(localStorage.getItem(orderStorageKey) || '[]');
-      existingOrders.push(newOrder);
-      localStorage.setItem(orderStorageKey, JSON.stringify(existingOrders));
-    } catch (error) {
-      console.error('Failed to store order', error);
+      // Create order via API (records in database ledger)
+      const response = await ordersService.createOrder({
+        supplyItem: selectedItem.name,
+        quantity: parseInt(formData.quantity),
+        unit: selectedItem.unit,
+        price: selectedItem.currentPrice,
+        totalAmount: orderPrice,
+        toRole: receiverRole as 'FARMER' | 'TRANSPORTER' | 'RETAILER',
+        deliveryPreference: formData.deliveryPreference,
+        destination: formData.destination,
+        notes: formData.notes || undefined,
+      });
+
+      const orderId = response.orderId;
+
+      // Create local order object for UI
+      const newOrder: Order = {
+        orderId,
+        supplyItem: selectedItem.name,
+        quantity: parseInt(formData.quantity),
+        unit: selectedItem.unit,
+        price: selectedItem.currentPrice,
+        totalAmount: orderPrice,
+        from: user.name || 'User',
+        fromDid: user.did || '',
+        fromRole: user.role,
+        toRole: receiverRole || '',
+        status: 'Pending',
+        deliveryPreference: formData.deliveryPreference,
+        destination: formData.destination,
+        notes: formData.notes || undefined,
+        createdAt: new Date().toISOString(),
+      };
+
+      console.log('[confirmOrder] Order created via API:', {
+        orderId,
+        txHash: response.txHash,
+        fromRole: user.role,
+        receiverRole,
+      });
+
+      // Add notification for order placed
+      addNotification({
+        type: 'order_placed',
+        orderId,
+        message: `Your order ${orderId} has been placed successfully`,
+        fromUser: user.name || 'User',
+        fromRole: user.role,
+        toRole: receiverRole || '',
+        supplyItem: selectedItem.name,
+        quantity: parseInt(formData.quantity),
+        unit: selectedItem.unit,
+        totalAmount: orderPrice,
+      });
+
+      // Add notification for order received
+      addNotification({
+        type: 'order_received',
+        orderId,
+        message: `New order received: ${selectedItem.name} (${formData.quantity} ${selectedItem.unit}) from ${user.name || 'User'}`,
+        fromUser: user.name || 'User',
+        fromRole: user.role,
+        toRole: receiverRole || '',
+        supplyItem: selectedItem.name,
+        quantity: parseInt(formData.quantity),
+        unit: selectedItem.unit,
+        totalAmount: orderPrice,
+        actionUrl: `${getOrderSuppliesPath()}?tab=receive`,
+      });
+
+      // For consumer, update local state for Active/Past Orders view
+      if (user.role === 'CONSUMER') {
+        setOrders([...orders, newOrder]);
+      }
+
+      // Show success message
+      setOrderSuccess(`Order placed successfully for ${formData.quantity} ${selectedItem.unit} of ${selectedItem.name}. Total: ₹${orderPrice.toLocaleString('en-IN')}`);
+
+      // Reset form
+      setFormData({
+        supplyItem: '',
+        quantity: '',
+        deliveryPreference: 'Standard',
+        destination: '',
+        notes: '',
+      });
+      setShowBill(false);
+    } catch (error: any) {
+      console.error('[confirmOrder] Failed to create order:', error);
+      setOrderSuccess(null);
+      setFormErrors({ 
+        supplyItem: error.response?.data?.error || 'Failed to place order. Please try again.' 
+      });
     }
-
-    // For consumer, also update local state for Active/Past Orders view
-    if (user.role === 'CONSUMER') {
-      setOrders([...orders, newOrder]);
-    }
-
-    // Show success message
-    setOrderSuccess(`Order placed successfully for ${formData.quantity} ${selectedItem.unit} of ${selectedItem.name}. Total: ₹${orderPrice.toLocaleString('en-IN')}`);
-
-    // Reset form
-    setFormData({
-      supplyItem: '',
-      quantity: '',
-      deliveryPreference: 'Standard',
-      destination: '',
-      notes: '',
-    });
-    setShowBill(false);
   };
 
   // Helper function to map display name to productId
@@ -486,153 +400,73 @@ export default function OrderSupplies() {
   };
 
   const handleAcceptOrder = async (order: Order) => {
-    // Only update supply quantity when a retailer accepts an order from a consumer
-    // This represents the actual sale/fulfillment of the order
-    if (user?.role === 'RETAILER' && order.fromRole === 'CONSUMER') {
-      try {
-        // Map display name to productId
-        const productId = getProductIdFromName(order.supplyItem);
-        console.log('[handleAcceptOrder] Updating supply quantity:', {
-          displayName: order.supplyItem,
-          productId,
-          quantity: order.quantity,
-          fromRole: order.fromRole,
-          toRole: user.role
-        });
-        
-        // Update supply quantity in database (decrease by order quantity)
-        // This is when the actual sale happens - quantity decreases in database
-        await suppliesService.updateSupplyQuantity(productId, order.quantity);
-        console.log('[handleAcceptOrder] Supply quantity updated successfully');
-        
-        // Increment total produce sold for retailer in localStorage
-        try {
-          const currentTotal = parseFloat(localStorage.getItem('unichain_retailer_total_sold') || '1280');
-          const newTotal = currentTotal + order.quantity;
-          localStorage.setItem('unichain_retailer_total_sold', newTotal.toString());
-        } catch (error) {
-          console.error('Failed to update retailer total sold:', error);
-        }
-        
-        // Reload supplies to reflect the change immediately
-        await loadSupplies();
-        
-        // The Supplies page auto-refreshes every 5 seconds, so all users will see the updated quantity
-      } catch (error: any) {
-        console.error('[handleAcceptOrder] Failed to update supply quantity:', error);
-        // Continue with order acceptance even if quantity update fails
-      }
-    }
-
-    // Update order status
-    const updatedOrders = orders.map(o => {
-      if (o.orderId === order.orderId) {
-        return { ...o, status: 'Accepted' as const };
-      }
-      return o;
-    });
-    setOrders(updatedOrders);
-
-    // Update orders in localStorage for the role that placed the order
-    const orderStorageKey = `unichain_${order.fromRole.toLowerCase()}_orders`;
     try {
-      const saved = localStorage.getItem(orderStorageKey);
-      const storedOrders = saved ? JSON.parse(saved) : [];
-      const updatedOrders = storedOrders.map((o: Order) => {
+      // Accept order via API (records in database ledger)
+      const response = await ordersService.acceptOrder(order.orderId);
+      
+      console.log('[handleAcceptOrder] Order accepted via API:', {
+        orderId: order.orderId,
+        txHash: response.txHash,
+      });
+
+      // Only update supply quantity when a retailer accepts an order from a consumer
+      if (user?.role === 'RETAILER' && order.fromRole === 'CONSUMER') {
+        try {
+          const productId = getProductIdFromName(order.supplyItem);
+          await suppliesService.updateSupplyQuantity(productId, order.quantity);
+          console.log('[handleAcceptOrder] Supply quantity updated successfully');
+          await loadSupplies();
+        } catch (error: any) {
+          console.error('[handleAcceptOrder] Failed to update supply quantity:', error);
+        }
+      }
+
+      // Update local order status
+      const updatedOrders = orders.map(o => {
         if (o.orderId === order.orderId) {
           return { ...o, status: 'Accepted' as const };
         }
         return o;
       });
-      localStorage.setItem(orderStorageKey, JSON.stringify(updatedOrders));
-      
-      // If consumer, also update local state to reflect the change immediately
-      if (order.fromRole === 'CONSUMER') {
-        // Reload consumer orders from localStorage to get the updated status
-        const updatedConsumerOrders = JSON.parse(localStorage.getItem('unichain_consumer_orders') || '[]');
-        setOrders(updatedConsumerOrders);
+      setOrders(updatedOrders);
+
+      // Remove order_received notifications
+      notifications.forEach(notif => {
+        if (notif.orderId === order.orderId && notif.type === 'order_received') {
+          removeNotification(notif.id);
+        }
+      });
+
+      // Add notification for order accepted
+      addNotification({
+        type: 'order_accepted',
+        orderId: order.orderId,
+        message: `Your order ${order.orderId} has been accepted! ${order.supplyItem} (${order.quantity} ${order.unit}) - Total: ₹${order.totalAmount.toLocaleString('en-IN')}`,
+        fromUser: user?.name || 'User',
+        fromRole: user?.role || '',
+        toRole: order.fromRole,
+        supplyItem: order.supplyItem,
+        quantity: order.quantity,
+        unit: order.unit,
+        totalAmount: order.totalAmount,
+      });
+
+      // Reload received orders to reflect the change
+      if (user?.role && user.role !== 'CONSUMER') {
+        setTimeout(() => {
+          loadReceivedOrders();
+        }, 100);
       }
-    } catch (error) {
-      console.error('Failed to update orders', error);
+
+      // Show success toast
+      setOrderSuccess(`Order ${order.orderId} accepted and recorded in ledger. Notification sent to ${order.from}.`);
+      setTimeout(() => setOrderSuccess(null), 5000);
+    } catch (error: any) {
+      console.error('[handleAcceptOrder] Failed to accept order:', error);
+      setOrderSuccess(null);
+      // Show error
+      alert(error.response?.data?.error || 'Failed to accept order. Please try again.');
     }
-
-    // Remove all order_received notifications for this order (closes order for all)
-    notifications.forEach(notif => {
-      if (notif.orderId === order.orderId && notif.type === 'order_received') {
-        removeNotification(notif.id);
-      }
-    });
-
-    // Add notification for order accepted (to the person who placed the order)
-    addNotification({
-      type: 'order_accepted',
-      orderId: order.orderId,
-      message: `Your order ${order.orderId} has been accepted! ${order.supplyItem} (${order.quantity} ${order.unit}) - Total: ₹${order.totalAmount.toLocaleString('en-IN')}`,
-      fromUser: user?.name || 'User',
-      fromRole: user?.role || '',
-      toRole: order.fromRole,
-      supplyItem: order.supplyItem,
-      quantity: order.quantity,
-      unit: order.unit,
-      totalAmount: order.totalAmount,
-    });
-
-    // Remove the "Order Placed" entry with status "Pending" from ledger and create "Order Accepted" entry
-    const existingLedger = JSON.parse(localStorage.getItem('unichain_economic_ledger_orders') || '[]');
-    
-    // Find the pending order entry
-    const pendingOrderIndex = existingLedger.findIndex((entry: any) => 
-      entry.orderId === order.orderId && 
-      (entry.entryType === 'ORDER_PLACED' || entry.status === 'Pending')
-    );
-    
-    let pendingEntryHash = null;
-    if (pendingOrderIndex !== -1) {
-      const pendingEntry = existingLedger[pendingOrderIndex];
-      pendingEntryHash = pendingEntry.txHash;
-      // Remove the pending entry
-      existingLedger.splice(pendingOrderIndex, 1);
-    }
-    
-    // Create new "Order Accepted" entry with payment method "Order Accepted"
-    const acceptedEntry = {
-      txId: `TX-${order.orderId}-ACCEPTED`,
-      txHash: `HASH-${order.orderId}-ACCEPTED-${Date.now()}`,
-      prevTxHash: pendingEntryHash,
-      batchId: null,
-      fromParty: order.from,
-      toParty: user?.name || 'User',
-      fromDid: order.fromDid || null,
-      toDid: user?.did || null,
-      product: order.supplyItem,
-      quantity: order.quantity,
-      unit: order.unit,
-      amount: order.totalAmount,
-      paymentMethod: 'Order Accepted',
-      timestamp: new Date().toISOString(),
-      currency: 'INR',
-      entryType: 'ORDER_ACCEPTED',
-      orderId: order.orderId,
-      status: 'Accepted',
-    };
-    
-    // Add the new accepted entry
-    existingLedger.push(acceptedEntry);
-    
-    // Save updated ledger
-    localStorage.setItem('unichain_economic_ledger_orders', JSON.stringify(existingLedger));
-    
-    // Reload received orders to reflect the change (remove accepted order from list)
-    // This will automatically remove the order from all retailers/transporters/farmers
-    if (user?.role && user.role !== 'CONSUMER') {
-      setTimeout(() => {
-        loadReceivedOrders();
-      }, 100);
-    }
-
-    // Show success toast
-    setOrderSuccess(`Order ${order.orderId} accepted. Notification sent to ${order.from}.`);
-    setTimeout(() => setOrderSuccess(null), 5000);
   };
 
   const formatDate = (dateString: string) => {
