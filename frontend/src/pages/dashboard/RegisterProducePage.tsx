@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { produceService } from '../../services/produce';
+import { suppliesService, Supply } from '../../services/supplies';
 
 type UnitOption = 'kg' | 'quintal' | 'tonne' | 'crate' | 'bag';
 
@@ -35,8 +36,44 @@ const RegisterProducePage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [supplies, setSupplies] = useState<Supply[]>([]);
+  const [loadingSupplies, setLoadingSupplies] = useState(true);
 
   const today = new Date().toISOString().split('T')[0];
+
+  // Fetch supplies from the backend on component mount
+  useEffect(() => {
+    const fetchSupplies = async () => {
+      try {
+        setLoadingSupplies(true);
+        const response = await suppliesService.getSupplies();
+        if (response.success) {
+          // Sort supplies by category and then by name
+          const sortedSupplies = response.supplies.sort((a, b) => {
+            if (a.category !== b.category) {
+              return a.category.localeCompare(b.category);
+            }
+            return a.name.localeCompare(b.name);
+          });
+          setSupplies(sortedSupplies);
+        }
+      } catch (error) {
+        console.error('Error fetching supplies:', error);
+      } finally {
+        setLoadingSupplies(false);
+      }
+    };
+    fetchSupplies();
+  }, []);
+
+  // Group supplies by category for the dropdown
+  const suppliesByCategory = supplies.reduce((acc, supply) => {
+    if (!acc[supply.category]) {
+      acc[supply.category] = [];
+    }
+    acc[supply.category].push(supply);
+    return acc;
+  }, {} as Record<string, Supply[]>);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -177,21 +214,33 @@ const RegisterProducePage: React.FC = () => {
             >
               Product Name <span className="text-red-500">*</span>
             </label>
-            <input
+            <select
               id="productName"
               name="productName"
-              type="text"
               value={form.productName}
               onChange={handleChange}
-              placeholder="e.g., Basmati Rice, Tomatoes"
+              disabled={loadingSupplies}
               className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${
                 errors.productName
                   ? 'border-red-500 focus:ring-red-500'
                   : 'border-gray-300'
-              }`}
-            />
+              } ${loadingSupplies ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            >
+              <option value="">
+                {loadingSupplies ? 'Loading supplies...' : 'Select a product'}
+              </option>
+              {Object.entries(suppliesByCategory).map(([category, categorySupplies]) => (
+                <optgroup key={category} label={`── ${category} ──`}>
+                  {categorySupplies.map((supply) => (
+                    <option key={supply.id} value={supply.name}>
+                      {supply.icon} {supply.name} (₹{supply.currentPrice}/{supply.unit})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
             <p className="mt-1 text-xs text-gray-500">
-              Enter the common name of the crop.
+              Select the product from the available supplies.
             </p>
             {errors.productName && (
               <p className="mt-1 text-xs text-red-600">{errors.productName}</p>
