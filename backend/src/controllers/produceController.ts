@@ -2,6 +2,28 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/database';
 import { createHash } from 'crypto';
 
+// Helper function to generate transaction hash
+function generateTxHash(data: string): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+// Helper function to get the last transaction hash for chain linking
+async function getLastEconomicTxHash(): Promise<string | null> {
+  const lastTx = await prisma.economicLedgerTx.findFirst({
+    orderBy: { createdAt: 'desc' },
+    select: { txHash: true },
+  });
+  return lastTx?.txHash || null;
+}
+
+async function getLastQualityTxHash(): Promise<string | null> {
+  const lastTx = await prisma.qualityLedgerTx.findFirst({
+    orderBy: { createdAt: 'desc' },
+    select: { txHash: true },
+  });
+  return lastTx?.txHash || null;
+}
+
 export async function registerProduce(req: any, res: Response) {
   try {
     const {
@@ -37,6 +59,7 @@ export async function registerProduce(req: any, res: Response) {
     // Verify user is a farmer
     const user = await prisma.user.findUnique({
       where: { did: farmerDid },
+      include: { farmerIdentity: true },
     });
 
     if (!user || user.role !== 'FARMER') {
@@ -94,6 +117,91 @@ export async function registerProduce(req: any, res: Response) {
       });
     }
 
+    // ===== CREATE LEDGER ENTRIES =====
+    
+    // 1. Create Economic Ledger Entry for produce registration
+    const totalValue = Number(quantity) * Number(sellingPrice);
+    const economicTxId = `ECO-PRODUCE-${batchId}-${timestamp}`;
+    const prevEconomicTxHash = await getLastEconomicTxHash();
+    const economicTxData = `${economicTxId}-${farmerDid}-${productName}-${quantity}-${sellingPrice}-${timestamp}`;
+    const economicTxHash = generateTxHash(economicTxData);
+
+    await prisma.economicLedgerTx.create({
+      data: {
+        txId: economicTxId,
+        txHash: economicTxHash,
+        prevTxHash: prevEconomicTxHash,
+        ledgerType: 'ECONOMIC',
+        batchId: batchId,
+        fromParty: 'FARMER',
+        toParty: null, // Produce registered, not yet sold
+        payerDid: farmerDid,
+        payeeDid: null,
+        product: productName,
+        quantity: Number(quantity),
+        amount: totalValue,
+        paymentMethod: null,
+        margin: null,
+        meta: {
+          type: 'PRODUCE_REGISTERED',
+          variety: variety || null,
+          unit: unit,
+          pricePerUnit: Number(sellingPrice),
+          harvestDate: harvestDate,
+          farmingMethod: farmingMethod,
+          farmerName: user.farmerIdentity?.name || user.name || 'Unknown',
+          businessName: user.farmerIdentity?.businessName || null,
+          notes: notes || null,
+        },
+      },
+    });
+
+    // 2. Create Quality Ledger Entry for initial quality record
+    const qualityTxId = `QUAL-HARVEST-${batchId}-${timestamp}`;
+    const prevQualityTxHash = await getLastQualityTxHash();
+    const qualityTxData = `${qualityTxId}-${farmerDid}-${batchId}-${farmingMethod}-${timestamp}`;
+    const qualityTxHash = generateTxHash(qualityTxData);
+
+    // Assign initial quality score based on farming method
+    const farmingMethodScores: Record<string, number> = {
+      organic: 95,
+      natural: 90,
+      integrated: 85,
+      conventional: 75,
+    };
+    const initialQualityScore = farmingMethodScores[farmingMethod] || 80;
+
+    await prisma.qualityLedgerTx.create({
+      data: {
+        txId: qualityTxId,
+        txHash: qualityTxHash,
+        prevTxHash: prevQualityTxHash,
+        ledgerType: 'QUALITY',
+        batchId: batchId,
+        actorDid: farmerDid,
+        stage: 'HARVEST',
+        qualityScore: initialQualityScore,
+        moistureLevel: null,
+        temperature: null,
+        spoilageDetected: false,
+        aiVerificationHash: null,
+        iotMerkleRoot: null,
+        qualityData: {
+          type: 'PRODUCE_REGISTERED',
+          productName: productName,
+          variety: variety || null,
+          farmingMethod: farmingMethod,
+          harvestDate: harvestDate,
+          quantity: Number(quantity),
+          unit: unit,
+          farmerDid: farmerDid,
+          notes: notes || null,
+        },
+      },
+    });
+
+    console.log(`[registerProduce] Created ledger entries for batch ${batchId}`);
+
     res.json({
       success: true,
       batchId: produceLog.batchId,
@@ -109,6 +217,10 @@ export async function registerProduce(req: any, res: Response) {
         sellingPrice: produceLog.sellingPrice,
         notes: produceLog.notes,
         createdAt: produceLog.createdAt,
+      },
+      ledger: {
+        economicTxId: economicTxId,
+        qualityTxId: qualityTxId,
       },
     });
   } catch (error: any) {
