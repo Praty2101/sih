@@ -63,36 +63,39 @@ export default function OrderSupplies() {
       
       if (user.role === 'CONSUMER') {
         // Load consumer orders from API (database ledger)
-        try {
-          const response = await ordersService.getMyOrders('placed');
-          const myOrders = response.orders || [];
-          
-          // Convert API response to Order format
-          const consumerOrders: Order[] = myOrders.map((entry: any) => ({
-            orderId: entry.orderId,
-            supplyItem: entry.product,
-            quantity: entry.quantity,
-            unit: entry.meta?.unit || 'kg',
-            price: entry.meta?.price || (entry.quantity > 0 ? entry.amount / entry.quantity : 0),
-            totalAmount: entry.amount,
-            from: entry.meta?.fromName || 'Me',
-            fromDid: entry.payerDid,
-            fromRole: entry.fromParty,
-            toRole: entry.toParty,
-            status: entry.status === 'ACCEPTED' ? 'Accepted' : 'Pending',
-            deliveryPreference: entry.meta?.deliveryPreference || 'Standard',
-            destination: entry.meta?.destination || '',
-            notes: entry.meta?.notes || undefined,
-            createdAt: entry.createdAt,
-          }));
-          
-          setOrders(consumerOrders);
-          setLoadingOrders(false);
-        } catch (error) {
-          console.error('Failed to load consumer orders', error);
-          setOrders([]);
-          setLoadingOrders(false);
-        }
+        const loadConsumerOrders = async () => {
+          try {
+            const response = await ordersService.getMyOrders('placed');
+            const myOrders = response.orders || [];
+            
+            // Convert API response to Order format
+            const consumerOrders: Order[] = myOrders.map((entry: any) => ({
+              orderId: entry.orderId,
+              supplyItem: entry.product,
+              quantity: entry.quantity,
+              unit: entry.meta?.unit || 'kg',
+              price: entry.meta?.price || (entry.quantity > 0 ? entry.amount / entry.quantity : 0),
+              totalAmount: entry.amount,
+              from: entry.meta?.fromName || 'Me',
+              fromDid: entry.payerDid,
+              fromRole: entry.fromParty,
+              toRole: entry.toParty,
+              status: entry.status === 'ACCEPTED' ? 'Accepted' : 'Pending',
+              deliveryPreference: entry.meta?.deliveryPreference || 'Standard',
+              destination: entry.meta?.destination || '',
+              notes: entry.meta?.notes || undefined,
+              createdAt: entry.createdAt,
+            }));
+            
+            setOrders(consumerOrders);
+            setLoadingOrders(false);
+          } catch (error) {
+            console.error('Failed to load consumer orders', error);
+            setOrders([]);
+            setLoadingOrders(false);
+          }
+        };
+        loadConsumerOrders();
       } else {
         // For other roles, load received orders from ledger
         loadReceivedOrders();
@@ -174,13 +177,6 @@ export default function OrderSupplies() {
     } finally {
       setLoadingOrders(false);
     }
-  };
-
-  const getReceiverRoleForOrder = (fromRole: string) => {
-    if (fromRole === 'CONSUMER') return 'RETAILER';
-    if (fromRole === 'RETAILER') return 'TRANSPORTER';
-    if (fromRole === 'TRANSPORTER') return 'FARMER';
-    return null;
   };
 
   const loadUser = async () => {
