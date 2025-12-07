@@ -13,6 +13,15 @@ import { registerProduce, getProduceLogs } from '../controllers/produceControlle
 import { getFarmerBatches, getTransporterBatches, getRetailerBatches, getDashboardMetrics } from '../controllers/dashboardController';
 import { getSupplies, updateSupplyQuantity } from '../controllers/suppliesController';
 import { createOrder, acceptOrder, updateOrderStatus, getMyOrders, getPendingOrders } from '../controllers/orderController';
+import { 
+  transporterPickup, 
+  updateTransportConditions, 
+  transporterDelivery,
+  retailerReceive,
+  retailerSale,
+  updateInventory,
+  getMyActivityLogs
+} from '../controllers/activityController';
 import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
@@ -52,6 +61,19 @@ router.post('/orders/accept', authMiddleware, acceptOrder);
 router.post('/orders/status', authMiddleware, updateOrderStatus);
 router.get('/orders/my', authMiddleware, getMyOrders);
 router.get('/orders/pending', authMiddleware, getPendingOrders);
+
+// Transporter activity routes (tracked in ledger)
+router.post('/transporter/pickup', authMiddleware, transporterPickup);
+router.post('/transporter/conditions', authMiddleware, updateTransportConditions);
+router.post('/transporter/delivery', authMiddleware, transporterDelivery);
+
+// Retailer activity routes (tracked in ledger)
+router.post('/retailer/receive', authMiddleware, retailerReceive);
+router.post('/retailer/sale', authMiddleware, retailerSale);
+router.post('/retailer/inventory', authMiddleware, updateInventory);
+
+// Activity logs
+router.get('/activity/logs', authMiddleware, getMyActivityLogs);
 
 // Admin routes
 router.get('/admin/overview', authMiddleware, getOverview);
