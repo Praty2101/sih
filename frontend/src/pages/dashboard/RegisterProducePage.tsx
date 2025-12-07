@@ -206,7 +206,7 @@ const RegisterProducePage: React.FC = () => {
       {/* Form card */}
       <section className="bg-white shadow-sm rounded-xl p-6 md:p-8">
         <form onSubmit={handleSubmit} noValidate>
-          {/* Product Name */}
+          {/* Product Name - Dropdown with supplies from API */}
           <div className="mb-5">
             <label
               htmlFor="productName"
