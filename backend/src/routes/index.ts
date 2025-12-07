@@ -12,6 +12,7 @@ import { getAccountDetails } from '../controllers/accountController';
 import { registerProduce, getProduceLogs } from '../controllers/produceController';
 import { getFarmerBatches, getTransporterBatches, getRetailerBatches, getDashboardMetrics } from '../controllers/dashboardController';
 import { getSupplies, updateSupplyQuantity } from '../controllers/suppliesController';
+import { createOrder, acceptOrder, updateOrderStatus, getMyOrders, getPendingOrders } from '../controllers/orderController';
 import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
@@ -44,6 +45,13 @@ router.get('/dashboard/farmer/batches', authMiddleware, getFarmerBatches);
 router.get('/dashboard/transporter/batches', authMiddleware, getTransporterBatches);
 router.get('/dashboard/retailer/batches', authMiddleware, getRetailerBatches);
 router.get('/dashboard/metrics', authMiddleware, getDashboardMetrics);
+
+// Order routes (tracked in ledger)
+router.post('/orders/create', authMiddleware, createOrder);
+router.post('/orders/accept', authMiddleware, acceptOrder);
+router.post('/orders/status', authMiddleware, updateOrderStatus);
+router.get('/orders/my', authMiddleware, getMyOrders);
+router.get('/orders/pending', authMiddleware, getPendingOrders);
 
 // Admin routes
 router.get('/admin/overview', authMiddleware, getOverview);
