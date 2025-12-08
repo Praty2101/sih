@@ -14,6 +14,8 @@ interface FormState {
   harvestDate: string;
   farmingMethod: '' | FarmingMethod;
   sellingPrice: string;
+  temperature: string;
+  moistureLevel: string;
   notes: string;
 }
 
@@ -27,6 +29,8 @@ const initialFormState: FormState = {
   harvestDate: '',
   farmingMethod: '',
   sellingPrice: '',
+  temperature: '',
+  moistureLevel: '',
   notes: '',
 };
 
@@ -147,6 +151,8 @@ const RegisterProducePage: React.FC = () => {
         harvestDate: form.harvestDate,
         farmingMethod: form.farmingMethod,
         sellingPrice: Number(form.sellingPrice),
+        temperature: form.temperature ? Number(form.temperature) : undefined,
+        moistureLevel: form.moistureLevel ? Number(form.moistureLevel) : undefined,
         notes: form.notes || undefined,
       };
 
@@ -426,6 +432,56 @@ const RegisterProducePage: React.FC = () => {
             {errors.sellingPrice && (
               <p className="mt-1 text-xs text-red-600">{errors.sellingPrice}</p>
             )}
+          </div>
+
+          {/* Temperature and Moisture Level */}
+          <div className="mb-5 grid gap-4 md:grid-cols-2">
+            <div>
+              <label
+                htmlFor="temperature"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Temperature (°C)
+              </label>
+              <input
+                id="temperature"
+                name="temperature"
+                type="number"
+                min={-10}
+                max={50}
+                step="0.1"
+                value={form.temperature}
+                onChange={handleChange}
+                placeholder="e.g., 4.0"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Optimal range: 2°C - 8°C for cold chain storage
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="moistureLevel"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Moisture Level (%)
+              </label>
+              <input
+                id="moistureLevel"
+                name="moistureLevel"
+                type="number"
+                min={0}
+                max={100}
+                step="0.1"
+                value={form.moistureLevel}
+                onChange={handleChange}
+                placeholder="e.g., 65.0"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Typical range: 60-80% for most produce
+              </p>
+            </div>
           </div>
 
           {/* Notes */}

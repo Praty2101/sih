@@ -34,6 +34,8 @@ export async function registerProduce(req: any, res: Response) {
       harvestDate,
       farmingMethod,
       sellingPrice,
+      temperature,
+      moistureLevel,
       notes,
     } = req.body;
 
@@ -162,14 +164,79 @@ export async function registerProduce(req: any, res: Response) {
     const qualityTxData = `${qualityTxId}-${farmerDid}-${batchId}-${farmingMethod}-${timestamp}`;
     const qualityTxHash = generateTxHash(qualityTxData);
 
-    // Assign initial quality score based on farming method
+    // Calculate quality score based on farming method, temperature, and moisture
     const farmingMethodScores: Record<string, number> = {
       organic: 95,
       natural: 90,
       integrated: 85,
       conventional: 75,
     };
-    const initialQualityScore = farmingMethodScores[farmingMethod] || 80;
+    let baseQualityScore = farmingMethodScores[farmingMethod] || 80;
+
+    // Temperature scoring (optimal: 2-8°C)
+    let temperatureScore = 100;
+    const tempValue = temperature ? Number(temperature) : null;
+    if (tempValue !== null) {
+      if (tempValue >= 2 && tempValue <= 8) {
+        temperatureScore = 100; // Perfect
+      } else if (tempValue >= 0 && tempValue < 2) {
+        temperatureScore = 90; // Slightly cold
+      } else if (tempValue > 8 && tempValue <= 12) {
+        temperatureScore = 80; // Slightly warm
+      } else if (tempValue < 0) {
+        temperatureScore = 60; // Freezing
+      } else if (tempValue > 12 && tempValue <= 15) {
+        temperatureScore = 50; // Too warm
+      } else if (tempValue > 15) {
+        temperatureScore = Math.max(20, 50 - (tempValue - 15) * 3); // Very warm
+      }
+    }
+
+    // Moisture scoring (optimal: 60-80%)
+    let moistureScore = 100;
+    const moistureValue = moistureLevel ? Number(moistureLevel) : null;
+    if (moistureValue !== null) {
+      if (moistureValue >= 60 && moistureValue <= 80) {
+        moistureScore = 100; // Perfect
+      } else if (moistureValue >= 50 && moistureValue < 60) {
+        moistureScore = 85; // Slightly dry
+      } else if (moistureValue > 80 && moistureValue <= 85) {
+        moistureScore = 85; // Slightly moist
+      } else if (moistureValue >= 40 && moistureValue < 50) {
+        moistureScore = 70; // Dry
+      } else if (moistureValue > 85 && moistureValue <= 90) {
+        moistureScore = 70; // Very moist
+      } else if (moistureValue < 40) {
+        moistureScore = Math.max(30, 70 - (40 - moistureValue) * 2); // Too dry
+      } else if (moistureValue > 90) {
+        moistureScore = Math.max(30, 70 - (moistureValue - 90) * 2); // Too wet
+      }
+    }
+
+    // Calculate final quality score:
+    // 40% farming method, 35% temperature, 25% moisture
+    // If temperature/moisture not provided, use only farming method
+    let finalQualityScore = baseQualityScore;
+    if (tempValue !== null && moistureValue !== null) {
+      finalQualityScore = Math.round(
+        baseQualityScore * 0.4 + 
+        temperatureScore * 0.35 + 
+        moistureScore * 0.25
+      );
+    } else if (tempValue !== null) {
+      finalQualityScore = Math.round(
+        baseQualityScore * 0.6 + 
+        temperatureScore * 0.4
+      );
+    } else if (moistureValue !== null) {
+      finalQualityScore = Math.round(
+        baseQualityScore * 0.7 + 
+        moistureScore * 0.3
+      );
+    }
+
+    // Ensure score is between 0 and 100
+    finalQualityScore = Math.max(0, Math.min(100, finalQualityScore));
 
     await prisma.qualityLedgerTx.create({
       data: {
@@ -180,9 +247,9 @@ export async function registerProduce(req: any, res: Response) {
         batchId: batchId,
         actorDid: farmerDid,
         stage: 'HARVEST',
-        qualityScore: initialQualityScore,
-        moistureLevel: null,
-        temperature: null,
+        qualityScore: finalQualityScore,
+        moistureLevel: moistureValue,
+        temperature: tempValue,
         spoilageDetected: false,
         aiVerificationHash: null,
         iotMerkleRoot: null,
@@ -195,6 +262,12 @@ export async function registerProduce(req: any, res: Response) {
           quantity: Number(quantity),
           unit: unit,
           farmerDid: farmerDid,
+          temperature: tempValue,
+          moistureLevel: moistureValue,
+          baseQualityScore: baseQualityScore,
+          temperatureScore: tempValue !== null ? temperatureScore : null,
+          moistureScore: moistureValue !== null ? moistureScore : null,
+          finalQualityScore: finalQualityScore,
           notes: notes || null,
         },
       },
