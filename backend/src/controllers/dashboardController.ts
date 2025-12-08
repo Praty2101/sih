@@ -303,45 +303,156 @@ export async function getDashboardMetrics(req: AuthRequest, res: Response) {
     const uniqueBatchesWithTemp = new Set(qualityTxs.map((tx) => tx.batchId).filter(Boolean));
     const totalTrackedBatches = uniqueBatchesWithTemp.size;
 
-    // Calculate freshness score from quality ledger
-    // Get quality entries for the user's batches (if farmer) or all batches
-    let freshnessScore = 91; // Default
-    let qualityEntriesForUser: any[] = [];
+    // Calculate freshness score based on:
+    // 1. Temperature readings (deviation from optimal 2-8°C range)
+    // 2. Days difference between harvest date and registration date
+    let freshnessScore = 100; // Start with perfect score
+    let temperatureScore = 100;
+    let freshnessFromAge = 100;
     
+    // Get produce logs for user or all
+    let produceLogs: any[] = [];
     if (userDid) {
-      // Get batches for this user
-      const userBatches = await prisma.produceLog.findMany({
+      produceLogs = await prisma.produceLog.findMany({
         where: { farmerDid: userDid },
-        select: { batchId: true },
-      });
-      const userBatchIds = userBatches.map(b => b.batchId);
-      
-      if (userBatchIds.length > 0) {
-        qualityEntriesForUser = await prisma.qualityLedgerTx.findMany({
-          where: { batchId: { in: userBatchIds } },
-          select: { qualityScore: true },
-        });
-      }
-    }
-    
-    // If no user-specific data, get all quality entries
-    if (qualityEntriesForUser.length === 0) {
-      qualityEntriesForUser = await prisma.qualityLedgerTx.findMany({
-        select: { qualityScore: true },
-        take: 100, // Limit for performance
+        select: { 
+          batchId: true, 
+          harvestDate: true, 
+          createdAt: true,
+          productName: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50, // Recent batches
       });
     }
     
-    // Calculate average freshness/quality score
-    if (qualityEntriesForUser.length > 0) {
-      const validScores = qualityEntriesForUser
-        .filter(q => q.qualityScore !== null)
-        .map(q => q.qualityScore as number);
+    if (produceLogs.length === 0) {
+      produceLogs = await prisma.produceLog.findMany({
+        select: { 
+          batchId: true, 
+          harvestDate: true, 
+          createdAt: true,
+          productName: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+    }
+    
+    // Calculate freshness based on days between harvest and registration
+    if (produceLogs.length > 0) {
+      const ageScores: number[] = [];
       
-      if (validScores.length > 0) {
-        freshnessScore = Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
+      for (const log of produceLogs) {
+        const harvestDate = new Date(log.harvestDate);
+        const registrationDate = new Date(log.createdAt);
+        
+        // Calculate days difference
+        const daysDiff = Math.floor(
+          (registrationDate.getTime() - harvestDate.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        
+        // Freshness decay: 
+        // 0 days = 100%, 1 day = 95%, 2 days = 85%, 3 days = 70%, 4+ days = decreasing
+        let ageScore = 100;
+        if (daysDiff === 0) {
+          ageScore = 100; // Same day registration - perfect freshness
+        } else if (daysDiff === 1) {
+          ageScore = 95; // 1 day old
+        } else if (daysDiff === 2) {
+          ageScore = 85; // 2 days old
+        } else if (daysDiff === 3) {
+          ageScore = 70; // 3 days old
+        } else if (daysDiff === 4) {
+          ageScore = 55; // 4 days old
+        } else if (daysDiff === 5) {
+          ageScore = 40; // 5 days old
+        } else if (daysDiff > 5) {
+          ageScore = Math.max(10, 40 - (daysDiff - 5) * 5); // Further decay
+        }
+        
+        ageScores.push(ageScore);
+      }
+      
+      // Average age-based freshness
+      if (ageScores.length > 0) {
+        freshnessFromAge = Math.round(
+          ageScores.reduce((a, b) => a + b, 0) / ageScores.length
+        );
       }
     }
+    
+    // Calculate temperature-based freshness score
+    // Get temperature readings for user's batches
+    const userBatchIds = produceLogs.map(p => p.batchId);
+    let tempReadings: any[] = [];
+    
+    if (userBatchIds.length > 0) {
+      tempReadings = await prisma.qualityLedgerTx.findMany({
+        where: {
+          batchId: { in: userBatchIds },
+          temperature: { not: null },
+        },
+        select: { temperature: true },
+      });
+    }
+    
+    if (tempReadings.length === 0) {
+      // Get all temperature readings if no user-specific data
+      tempReadings = await prisma.qualityLedgerTx.findMany({
+        where: { temperature: { not: null } },
+        select: { temperature: true },
+        take: 100,
+      });
+    }
+    
+    if (tempReadings.length > 0) {
+      const tempScores: number[] = [];
+      
+      for (const reading of tempReadings) {
+        const temp = reading.temperature as number;
+        let tempScore = 100;
+        
+        // Optimal range: 2°C - 8°C (cold chain)
+        if (temp >= 2 && temp <= 8) {
+          tempScore = 100; // Perfect temperature
+        } else if (temp >= 0 && temp < 2) {
+          tempScore = 90; // Slightly too cold
+        } else if (temp > 8 && temp <= 12) {
+          tempScore = 80; // Slightly too warm
+        } else if (temp < 0) {
+          tempScore = 60; // Freezing - damages produce
+        } else if (temp > 12 && temp <= 15) {
+          tempScore = 50; // Too warm - spoilage risk
+        } else if (temp > 15) {
+          tempScore = Math.max(10, 50 - (temp - 15) * 5); // Very warm - rapid spoilage
+        }
+        
+        tempScores.push(tempScore);
+      }
+      
+      if (tempScores.length > 0) {
+        temperatureScore = Math.round(
+          tempScores.reduce((a, b) => a + b, 0) / tempScores.length
+        );
+      }
+    }
+    
+    // Final freshness score: weighted average (60% age, 40% temperature)
+    // If no temperature data, use only age
+    if (tempReadings.length > 0) {
+      freshnessScore = Math.round(freshnessFromAge * 0.6 + temperatureScore * 0.4);
+    } else {
+      freshnessScore = freshnessFromAge;
+    }
+    
+    console.log('[getDashboardMetrics] Freshness calculation:', {
+      freshnessFromAge,
+      temperatureScore,
+      finalFreshnessScore: freshnessScore,
+      produceLogsCount: produceLogs.length,
+      tempReadingsCount: tempReadings.length,
+    });
 
     // Cold chain stability: percentage of readings within optimal range
     const totalTempReadings = qualityTxs.length;
