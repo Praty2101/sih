@@ -49,6 +49,10 @@ export default function FarmerDashboard() {
     totalBatches: 0,
     traceabilityRate: 100,
     complianceScore: 99.3,
+    trustScore: 50,
+    freshnessScore: 91,
+    coldChainStability: 94,
+    deviations: 0,
   });
 
   useEffect(() => {
@@ -99,14 +103,21 @@ export default function FarmerDashboard() {
       // Combine backend and frontend order counts
       const totalOrders = backendMetrics.data.totalOrders + orderCount;
       
-      // Ensure traceabilityRate is a valid number (default to 100 if undefined/null)
+      // Ensure values are valid numbers with defaults
       const traceabilityRate = backendMetrics.data.traceabilityRate ?? 100;
+      const trustScore = backendMetrics.data.trustScore ?? 50;
+      const freshnessScore = backendMetrics.data.freshnessScore ?? 91;
+      const coldChainStability = backendMetrics.data.coldChainStability ?? 94;
+      const deviations = backendMetrics.data.deviations ?? 0;
       
       console.log('[FarmerDashboard] Metrics loaded:', {
         totalOrders,
         totalBatches: backendMetrics.data.totalBatches,
         traceabilityRate,
-        rawTraceabilityRate: backendMetrics.data.traceabilityRate,
+        trustScore,
+        freshnessScore,
+        coldChainStability,
+        deviations,
       });
       
       setMetrics({
@@ -114,6 +125,10 @@ export default function FarmerDashboard() {
         totalBatches: backendMetrics.data.totalBatches,
         traceabilityRate: typeof traceabilityRate === 'number' ? traceabilityRate : 100,
         complianceScore: 99.3,
+        trustScore: typeof trustScore === 'number' ? trustScore : 50,
+        freshnessScore: typeof freshnessScore === 'number' ? freshnessScore : 91,
+        coldChainStability: typeof coldChainStability === 'number' ? coldChainStability : 94,
+        deviations: typeof deviations === 'number' ? deviations : 0,
       });
     } catch (error) {
       console.error('Failed to load metrics:', error);
@@ -167,10 +182,7 @@ export default function FarmerDashboard() {
     return statusMap[status] || { text: status, color: 'text-gray-700', bgColor: 'bg-gray-50' };
   };
 
-  // Mock values for system metrics
-  const coldChainStability = 94;
-  const freshnessScore = 91;
-  const deviations = 2;
+  // Use actual metrics from backend
   const ledgerSync = 99.98;
 
   return (
@@ -214,21 +226,27 @@ export default function FarmerDashboard() {
           {/* Status Indicators */}
           <div className="mt-6 pt-6 border-t border-slate-700/50 flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+              <span className="text-sm font-semibold text-slate-300">
+                Trust Score: <span className="text-white">{metrics.trustScore}%</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
               <span className="text-sm font-semibold text-slate-300">
-                Cold Chain Stability: <span className="text-white">{coldChainStability}%</span>
+                Cold Chain Stability: <span className="text-white">{metrics.coldChainStability}%</span>
               </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
               <span className="text-sm font-semibold text-slate-300">
-                Freshness Score: <span className="text-white">{freshnessScore}/100</span>
+                Freshness Score: <span className="text-white">{metrics.freshnessScore}/100</span>
               </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-amber-400 rounded-full"></div>
               <span className="text-sm font-semibold text-slate-300">
-                Deviations: <span className="text-white">{deviations}</span>
+                Deviations: <span className="text-white">{metrics.deviations}</span>
               </span>
             </div>
           </div>

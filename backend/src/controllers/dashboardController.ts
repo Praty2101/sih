@@ -245,14 +245,27 @@ export async function getRetailerBatches(req: AuthRequest, res: Response) {
 // Get dashboard metrics for all users
 export async function getDashboardMetrics(req: AuthRequest, res: Response) {
   try {
-    // 1. Total Orders Tracked - Count all orders from Economic Ledger (ORDER_PLACED and ORDER_ACCEPTED)
-    // Note: Orders are stored in localStorage on frontend, but we count from database EconomicLedgerTx
-    // that may have order-related transactions
+    const userDid = req.did;
+
+    // Get user's trust score
+    let trustScore = 0.5; // Default trust score
+    if (userDid) {
+      const user = await prisma.user.findUnique({
+        where: { did: userDid },
+        select: { trustScore: true },
+      });
+      if (user) {
+        trustScore = user.trustScore;
+      }
+    }
+
+    // 1. Total Orders Tracked - Count all orders from Economic Ledger
     const totalOrders = await prisma.economicLedgerTx.count({
       where: {
         OR: [
           { paymentMethod: 'Order Placed' },
           { paymentMethod: 'Order Accepted' },
+          { paymentMethod: 'ORDER' },
         ],
       },
     });
@@ -269,6 +282,7 @@ export async function getDashboardMetrics(req: AuthRequest, res: Response) {
       select: {
         temperature: true,
         batchId: true,
+        qualityScore: true,
       },
     });
 
@@ -289,26 +303,78 @@ export async function getDashboardMetrics(req: AuthRequest, res: Response) {
     const uniqueBatchesWithTemp = new Set(qualityTxs.map((tx) => tx.batchId).filter(Boolean));
     const totalTrackedBatches = uniqueBatchesWithTemp.size;
 
+    // Calculate freshness score from quality ledger
+    // Get quality entries for the user's batches (if farmer) or all batches
+    let freshnessScore = 91; // Default
+    let qualityEntriesForUser: any[] = [];
+    
+    if (userDid) {
+      // Get batches for this user
+      const userBatches = await prisma.produceLog.findMany({
+        where: { farmerDid: userDid },
+        select: { batchId: true },
+      });
+      const userBatchIds = userBatches.map(b => b.batchId);
+      
+      if (userBatchIds.length > 0) {
+        qualityEntriesForUser = await prisma.qualityLedgerTx.findMany({
+          where: { batchId: { in: userBatchIds } },
+          select: { qualityScore: true },
+        });
+      }
+    }
+    
+    // If no user-specific data, get all quality entries
+    if (qualityEntriesForUser.length === 0) {
+      qualityEntriesForUser = await prisma.qualityLedgerTx.findMany({
+        select: { qualityScore: true },
+        take: 100, // Limit for performance
+      });
+    }
+    
+    // Calculate average freshness/quality score
+    if (qualityEntriesForUser.length > 0) {
+      const validScores = qualityEntriesForUser
+        .filter(q => q.qualityScore !== null)
+        .map(q => q.qualityScore as number);
+      
+      if (validScores.length > 0) {
+        freshnessScore = Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
+      }
+    }
+
+    // Cold chain stability: percentage of readings within optimal range
+    const totalTempReadings = qualityTxs.length;
+    const goodTempReadings = totalTempReadings - coldChainBreaks;
+    const coldChainStability = totalTempReadings > 0 
+      ? Math.round((goodTempReadings / totalTempReadings) * 100) 
+      : 94; // Default if no readings
+
     // Traceability rate is always 100% (system requirement)
     const traceabilityRate = 100;
 
     // Ensure traceabilityRate is a valid number
     const finalTraceabilityRate = isNaN(traceabilityRate) ? 100 : Math.max(0, Math.min(100, traceabilityRate));
     
-    console.log('[getDashboardMetrics] Traceability calculation:', {
+    console.log('[getDashboardMetrics] Metrics:', {
       totalBatchesInSystem,
       totalTrackedBatches,
       coldChainBreaks,
-      traceabilityRate,
-      finalTraceabilityRate,
+      trustScore,
+      freshnessScore,
+      coldChainStability,
     });
 
     res.json({
       totalOrders,
       totalBatches,
-      traceabilityRate: Math.round(finalTraceabilityRate * 100) / 100, // Round to 2 decimal places
+      traceabilityRate: Math.round(finalTraceabilityRate * 100) / 100,
       coldChainBreaks,
       totalTrackedBatches,
+      trustScore: Math.round(trustScore * 100), // Convert to percentage (0-100)
+      freshnessScore,
+      coldChainStability,
+      deviations: coldChainBreaks,
     });
   } catch (error: any) {
     console.error('Error fetching dashboard metrics:', error);
